@@ -5,7 +5,7 @@ require(tm)
 require(SnowballC)
 
 # Creating a corpus from the file
-df <- read.table("dataset/plot_summaries.txt", header = FALSE, sep="\t")
+df <- read.table("https://raw.githubusercontent.com/lypf2018/MovieReviewsSearchEngine/master/dataset/plot_summaries.txt", header = FALSE, sep="\t")
 df_title <- data.frame(doc_id = df[,1], text = df[,2])
 df_title <- df_title %>% 
   mutate(rowIndex=as.numeric(row.names(.))) %>% 
