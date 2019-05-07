@@ -1,71 +1,55 @@
-# require(SparkR)
+require(SparkR)
 require(tidytext)
 require(dplyr)
 require(tm)
-# require(SnowballC)
-
-# Creating a dataframe of movie_names from the file
-movie_names <- read.delim("https://raw.githubusercontent.com/lypf2018/MovieReviewsSearchEngine/master/dataset/movie.metadata.tsv", header = FALSE)
-df_movie_names_title <- data.frame(doc_id = movie_names[,1], movie_name = movie_names[,3])
+require(SnowballC)
 
 # Creating a corpus from the file
-df <- read.delim("https://raw.githubusercontent.com/lypf2018/MovieReviewsSearchEngine/master/dataset/plot_summaries.txt", header = FALSE, sep="\t")
+df <- read.table("https://raw.githubusercontent.com/lypf2018/MovieReviewsSearchEngine/master/dataset/plot_summaries.txt", header = FALSE, sep="\t")
 df_title <- data.frame(doc_id = df[,1], text = df[,2])
-df_merged <- merge(df_title,df_movie_names_title, by="doc_id")
-df_merged <- df_merged %>% 
+df_title <- df_title %>% 
   mutate(rowIndex=as.numeric(row.names(.))) %>% 
-  select(text, doc_id, movie_name, rowIndex)
+  select(text,doc_id,rowIndex)
 
 # Transforming documents into a list
-docList <- as.list(df_merged$text)
+docList <- as.list(df_title$text)
 N.docs <- length(docList)
-
-# store docs in Corpus class which is a fundamental data structure in text mining
-my.docs <- VectorSource(docList)
-
-
-# Pre-processing
-# 1.Removing stop words
-# 2.Word stemming
-# Transform/standaridze docs to get ready for analysis
-# 3.Saving pre-processed data for faster processing next time
-my.docsCorpus <- VCorpus(my.docs) %>% 
-  tm_map(stemDocument) %>%
-  tm_map(removeNumbers) %>% 
-  tm_map(content_transformer(tolower)) %>% 
-  tm_map(removeWords,stopwords("en")) %>%
-  tm_map(stripWhitespace)
 
 QrySearch <- function(queryTerm) {
   
   # Record starting time to measure your search engine performance
   start.time <- Sys.time()
-  queryList <- as.list(factor(queryTerm))
-
+  
   # store docs in Corpus class which is a fundamental data structure in text mining
-  my.query <- VectorSource(queryList)
+  my.docs <- VectorSource(c(docList, queryTerm))
+  
   
   # Pre-processing
   # 1.Removing stop words
   # 2.Word stemming
   # Transform/standaridze docs to get ready for analysis
-  my.queryCorpus <- VCorpus(my.query) %>% 
+  my.corpus <- VCorpus(my.docs) %>% 
     tm_map(stemDocument) %>%
     tm_map(removeNumbers) %>% 
     tm_map(content_transformer(tolower)) %>% 
     tm_map(removeWords,stopwords("en")) %>%
     tm_map(stripWhitespace)
-
-  my.queryCorpus[[1]]$meta$id <- N.docs + 1
-  my.corpus<- c(my.docsCorpus, my.queryCorpus)
-
+  
+  # 3.Saving pre-processed data for faster processing next time
+  # writeCorpus(my.corpus, path = "./dataset/pre-processed_dataset",
+  #             filenames = paste(seq_along(my.corpus), ".txt", sep = ""))
+  
   # Store docs into a term document matrix where rows=terms and cols=docs
   # Normalize term counts by applying TDiDF weightings
   term.doc.matrix.stm <- TermDocumentMatrix(my.corpus,
                                             control=list(
-                                              weighting=function(x) weightTfIdf(x, normalize = FALSE),
-                                              stopwords = TRUE))
-
+                                              function(x)
+                                                weightTfIdf(x, normalize =
+                                                              FALSE),
+                                              wordLengths=c(1,Inf)))
+  
+  
+  
   # Transform term document matrix into a dataframe
   term.doc.matrix <- tidy(term.doc.matrix.stm) %>% 
     group_by(document) %>% 
@@ -79,7 +63,11 @@ QrySearch <- function(queryTerm) {
   qryMatrix <- term.doc.matrix %>% 
     mutate(document=as.numeric(document)) %>% 
     filter(document>=N.docs+1)
-
+  
+  
+  
+  
+  
   # Calcualte top ten results by cosine similarity
   searchRes <- docMatrix %>% 
     inner_join(qryMatrix,by=c("term"="term"),
@@ -89,11 +77,12 @@ QrySearch <- function(queryTerm) {
     summarise(Score=sum(termScore)) %>% 
     filter(row_number(desc(Score))<=10) %>% 
     arrange(desc(Score)) %>% 
-    left_join(df_merged,by=c("document.doc"="rowIndex")) %>% 
+    left_join(df_title,by=c("document.doc"="rowIndex")) %>% 
     ungroup() %>% 
     rename(Result=text) %>% 
-    select(Result,Score,doc_id,movie_name) %>% 
+    select(Result,Score,doc_id) %>% 
     data.frame()
+  
   
   # Record when it stops and take the difference
   end.time <- Sys.time()
